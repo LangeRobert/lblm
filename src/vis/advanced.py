@@ -1,16 +1,19 @@
+from queue import Queue
+
 from panda3d.core import loadPrcFileData, Shader
 
 loadPrcFileData('', 'basic-shaders-only #f')  # Allow custom shaders
 
 from direct.showbase.ShowBase import ShowBase
-from panda3d.core import AmbientLight, DirectionalLight, Vec4, ClockObject
+from panda3d.core import AmbientLight, DirectionalLight, Vec4
 from direct.actor.Actor import Actor
 from direct.task import Task
 from direct.interval.LerpInterval import LerpFunc
 
 class Visualizer(ShowBase):
-    def __init__(self, options):
+    def __init__(self, options, queue:Queue):
         ShowBase.__init__(self)
+        self.queue = queue
         self.current_anim_index = 0
 
         self.disableMouse()
@@ -82,7 +85,3 @@ class Visualizer(ShowBase):
     def start(self):
         # Schedule animation switching every 5 seconds
         self.taskMgr.doMethodLater(5, self.cycle_animations, "CycleAnimationsTask")
-
-if __name__ == '__main__':
-    app = Visualizer()
-    app.run()
