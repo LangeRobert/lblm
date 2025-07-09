@@ -10,10 +10,10 @@ if __name__ == '__main__':
     queue = Queue()
     options = load_animations()
 
-    vis = Visualizer(options=options)
+    vis = Visualizer(options=options, queue=queue)
 
     # init and start the controller
-    controller = Controller(options=options, output_queue=queue)
+    controller = Controller(options=options.keys(), output_queue=queue)
     controller.start()
 
     vis.run()

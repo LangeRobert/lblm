@@ -1,42 +1,35 @@
 import threading
 from queue import Queue
 from typing import List
-
 import lmstudio as lms
 
+PROMPT = \
+"""
+Respond in just one or two words, using the following options:
+{options}
+Separate options with a comma. Dont use any other text. Try to use just one pantomime if possible.
+"""
 
 class Controller(threading.Thread):
     def __init__(self, output_queue, options:List[str]):
         super().__init__()
         self.output_queue:Queue = output_queue
-        self.options = options
+        self.options = [o for o in options if not o == "idle"]
 
-        self.prompt = f"""
-            Just respond with a combination of the following words:
-            {','.join(self.options)}
-            Separate words with a comma. Dont use any other text.
-            Just use 3-5 words to describe what you want to say.
-        """
+        self.prompt = PROMPT.format(options=", ".join(self.options))
 
     def run(self):
         model = lms.llm("google/gemma-3-4b")
-        chat = lms.Chat(self.prompt)
         while True:
             user_input = input()
+            chat = lms.Chat(self.prompt)
             chat.add_user_message(user_input)
             response = model.respond(chat)
-            self.output_queue.put(response)
+            result = response.content
+            print(f"Response: {result}")
 
-
-
-if __name__ == '__main__':
-    output_queue = Queue()
-    options = ['angry', 'wave', 'cheer', 'play_guitar', 'walk_back', 'punch', 'hit_baseball', 'dance', 'joy_jump', 'die', 'hang']
-    controller = Controller(output_queue, options)
-    controller.start()
-
-    # Example of how to use the output queue
-    while True:
-        if not output_queue.empty():
-            message = output_queue.get()
-            print(f"{message}", end="\n\n ---")
+            # Split the response into words and filter out empty strings
+            words = [word.strip() for word in result.split(',') if word.strip() and word.strip() in self.options]
+            # Ensure the response contains only valid options
+            for word in words:
+                self.output_queue.put(word)

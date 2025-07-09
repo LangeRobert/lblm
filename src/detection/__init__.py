@@ -14,7 +14,7 @@ PoseLandmarkerOptions = mp.tasks.vision.PoseLandmarkerOptions
 PoseLandmarkerResult = mp.tasks.vision.PoseLandmarkerResult
 VisionRunningMode = mp.tasks.vision.RunningMode
 
-MODEL_PATH = "./detection/model.task"
+MODEL_PATH = "./model.task"
 
 class Detector(threading.Thread):
 

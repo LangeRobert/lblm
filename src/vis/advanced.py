@@ -57,11 +57,18 @@ class Visualizer(ShowBase):
 
     def cycle_animations(self, task: Task):
         from_anim = list(self.animations.keys())[self.current_anim_index]
-        to_anim_index = (self.current_anim_index + 1) % len(self.animations)
+
+        if self.queue.empty():
+            to_anim_index = 0
+        else:
+            value = self.queue.get(block=False)
+            if value:
+                print(f"🎭 Received animation request: {value}")
+                to_anim_index = list(self.animations.keys()).index(value)
+            else:
+                to_anim_index = 0
         to_anim = list(self.animations.keys())[to_anim_index]
         self.current_anim_index = to_anim_index
-
-        print(f"🎞️ Crossfading from {from_anim} to {to_anim}")
 
         self.actor.enableBlend()  # Enable animation blending
         self.actor.loop(from_anim)
@@ -78,8 +85,11 @@ class Visualizer(ShowBase):
         # Crossfade over 1 second
         LerpFunc(set_blend, fromData=0.0, toData=1.0, duration=1.0).start()
 
+        # get the length of the current animation
+        anim_length = self.actor.getDuration(to_anim)
+
         # Schedule next transition after 5 seconds
-        self.taskMgr.doMethodLater(5.0, self.cycle_animations, "CycleAnimationsTask")
+        self.taskMgr.doMethodLater(anim_length, self.cycle_animations, "CycleAnimationsTask")
         return Task.done
 
     def start(self):
