@@ -1,16 +1,19 @@
+from queue import Queue
+
+from src.vis import Visualizer
+from src.util import load_animations
+from src.controller import Controller
+
 
 
 if __name__ == '__main__':
-    from src.vis.vis import BodyModelVisualizer
-    from src.model import BodyModel
-    from src.detection import Detector
+    queue = Queue()
+    options = load_animations()
 
-    # init the model and the shared memory
-    model = BodyModel.default()
-    #model.save()
+    vis = Visualizer(options=options)
 
-    detector = Detector(model)
-    detector.start()
+    # init and start the controller
+    controller = Controller(options=options, output_queue=queue)
+    controller.start()
 
-    visualizer = BodyModelVisualizer(model)
-    visualizer.run()
+    vis.run()
