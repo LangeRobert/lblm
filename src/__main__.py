@@ -1,19 +1,24 @@
-from queue import Queue
-
-from src.vis import Visualizer
-from src.util import load_animations
+from src.animations import load_animations
+from src.brain import Brain
 from src.controller import Controller
-
-
+from src.detection.live_detector import Detector
+from src.vis import Visualizer
 
 if __name__ == '__main__':
-    queue = Queue()
-    options = load_animations()
+    options = load_animations(base_path="animations", animation_folder="GLBs")
 
-    vis = Visualizer(options=options, queue=queue)
+    brain = Brain()
 
-    # init and start the controller
-    controller = Controller(options=options.keys(), output_queue=queue)
+    vis = Visualizer(options=options, queue=brain.output_queue)
+    controller = Controller(options=options.keys(), output_queue=brain.input_queue)
+    detector = Detector(data_queue=brain.input_queue,stop_event=brain.stop_event)
+
+    brain.start()
     controller.start()
+    detector.start()
+    vis.start()
 
-    vis.run()
+    brain.join()
+    controller.join()
+    detector.join()
+    vis.join()

@@ -12,7 +12,7 @@ Separate options with a comma. Dont use any other text. Try to use just one pant
 
 class Controller(threading.Thread):
     def __init__(self, output_queue, options:List[str]):
-        super().__init__()
+        super().__init__(name="Controller")
         self.output_queue:Queue = output_queue
         self.options = [o for o in options if not o == "idle"]
 

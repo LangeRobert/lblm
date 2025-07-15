@@ -7,3 +7,5 @@ opencv-python~=4.11.0.86
 mediapipe~=0.10.21
 Panda3D~=1.10.15
 screeninfo~=0.8.1
+moviepy~=2.2.1
+lmstudio~=1.4.1
