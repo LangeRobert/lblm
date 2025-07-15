@@ -1,5 +1,7 @@
 from panda3d.core import loadPrcFileData, Shader
 
+from src.vis.pie import PieChart3D
+
 loadPrcFileData('', 'basic-shaders-only #f')  # Allow custom shaders
 
 from direct.showbase.ShowBase import ShowBase
@@ -48,6 +50,11 @@ class _Visualizer(ShowBase):
             self.actor.reparentTo(self.render)
             self.actor.setScale(1)
             self.actor.setPos(0, 0, 0)
+
+            # pie chart
+            self.pie = PieChart3D(self.render)
+            self.pie_duration = 8.0  # seconds for full animation
+            self.taskMgr.add(self.update_pie, "update_pie")
 
             # Load and apply the shader
             try:
@@ -145,6 +152,11 @@ class _Visualizer(ShowBase):
             print(f"Error starting visualizer: {e}")
             import traceback
             traceback.print_exc()
+
+    def update_pie(self, task):
+        elapsed = task.time
+        self.pie.update(elapsed % self.pie_duration / self.pie_duration)
+        return Task.cont
 
 
 # Alternative approach - run in main thread instead of subprocess
