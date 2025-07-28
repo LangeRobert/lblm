@@ -38,8 +38,8 @@ You can interact with the installation by moving your body in front of the webca
 Try things out. Have fun. Think about the first interactions with ChatGPT and how it felt to talk to a machine.
 
 # Thanks
-Huge thanks for the support to Michelle, Florian and Friedrich for the great seminar and support.
-Also thank you to the wonderful people that have build the great software used in this project, primarily:
+Huge thanks for the support and the great seminar to Michelle, Florian and Friedrich.
+Also thank you to the wonderful people that have built the great software used in this project, primarily:
 [MediaPipe](https://ai.google.dev/edge/mediapipe/solutions/guide), 
 [The HuggingFace Community](https://huggingface.co/), 
 [Panda3D](https://www.panda3d.org/) and [Mixamo](https://www.mixamo.com/).
