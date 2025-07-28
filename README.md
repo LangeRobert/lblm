@@ -35,4 +35,11 @@ After that, the installation will start and you will see a window with the webca
 
 ### 4. Interact
 You can interact with the installation by moving your body in front of the webcam.
-Try things out. Have fun. Think about the first interactions with 
+Try things out. Have fun. Think about the first interactions with ChatGPT and how it felt to talk to a machine.
+
+# Thanks
+Huge thanks for the support to Michelle, Florian and Friedrich for the great seminar and support.
+Also thank you to the wonderful people that have build the great software used in this project, primarily:
+[MediaPipe](https://ai.google.dev/edge/mediapipe/solutions/guide), 
+[The HuggingFace Community](https://huggingface.co/), 
+[Panda3D](https://www.panda3d.org/) and [Mixamo](https://www.mixamo.com/).

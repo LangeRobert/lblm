@@ -9,9 +9,10 @@ from .body_model import BodyModel
 
 PROMPT = \
     """
-    Respond in just one or two words, using the following options:
+    The user made a gesture that you interpret as {user_gesture}.
+    The user describes a gesture. You need to creatively respond with exactly ONE of the following options:
     {options}
-    Separate options with a comma. Dont use any other text. Try to use just one pantomime if possible. Be very creative.
+    Just give the one word and nothing else!!
     """
 
 
@@ -29,8 +30,6 @@ class Brain(threading.Thread):
         # options
         self.options = load_animations(animations_path="lblm/data/animations")
         self.vectors = self.load_vectors()
-
-        self.prompt = PROMPT.format(options=", ".join(self.options))
 
     def find_most_similar_vector(self, query_vector, similarity='cosine'):
         def cosine_similarity(a, b):
@@ -75,8 +74,9 @@ class Brain(threading.Thread):
             self.is_outputting_event.set()
 
             llm = Llama.from_pretrained(
-                repo_id="unsloth/DeepSeek-R1-0528-Qwen3-8B-GGUF",
-                filename="DeepSeek-R1-0528-Qwen3-8B-Q8_0.gguf",
+                repo_id="bartowski/Llama-3.2-3B-Instruct-GGUF",
+                filename="Llama-3.2-3B-Instruct-Q8_0.gguf",
+                n_gpu_layers=-1,  # Use all layers on GPU
             )
 
             while True:
@@ -89,23 +89,21 @@ class Brain(threading.Thread):
                     print(f"Closest match: {closest_match}")
 
 
-                    system_prompt:ChatCompletionRequestSystemMessage = {"role": "system", "content": self.prompt.format(options=", ".join(self.options))}
-                    user_message:ChatCompletionRequestUserMessage = {"role": "user", "content": "The user made a gesture that you interpret with: " + closest_match}
+                    prompt:ChatCompletionRequestSystemMessage = {"role": "system", "content": PROMPT.format(options=", ".join(self.options), user_gesture=closest_match)}
 
                     print("Starting Completion")
                     response = llm.create_chat_completion(
                         top_p=0.95,
                         temperature=0.7,
                         max_tokens=50,
-                        messages=[
-                            system_prompt,
-                            user_message
-                        ]
+                        messages=[ prompt ]
                     )
-                    result = response.choices[0].message.content
-                    print(f"LBLM Response: {result}")
+
+                    result = response["choices"][0]["message"]["content"]
+                    print(f"LBLM Raw Response: {result}")
                     words = [word.strip() for word in result.split(',') if word.strip() and word.strip() in self.options]
+                    print(f"LBLM Filtered Response: {words}")
                     for word in words:
                         self.output_queue.put(word)
-        except Exception as _:
-            print(f"Brain Freeze")
+        except Exception as e:
+            print(f"Brain Freeze: {e}")
