@@ -1,6 +1,6 @@
-from brain import Brain
-from detection.live_detector import Detector
-from vis import Visualizer
+from .brain import Brain
+from .detector import Detector
+from .visualizer import Visualizer
 
 if __name__ == '__main__':
 

@@ -99,7 +99,7 @@ class Visualizer(Process):
 
 
 class _Visualizer(ShowBase):
-    def __init__(self, options, queue: Queue, is_outputting_event: Event):
+    def __init__(self, options, queue: Queue, is_outputting_event: Event, actor_path="lblm/data/character.glb"):
         try:
             ShowBase.__init__(self)
             self.queue = queue
@@ -115,7 +115,7 @@ class _Visualizer(ShowBase):
             # Load GLB model with rig
             self.animations = options
 
-            self.actor = Actor("vis/model.glb", self.animations)
+            self.actor = Actor(actor_path, self.animations)
             self.actor.reparentTo(self.render)
             self.actor.setScale(1)
             self.actor.setPos(0, 0, 0)
@@ -131,7 +131,7 @@ class _Visualizer(ShowBase):
 
             # Load and apply the shader
             try:
-                shader = Shader.load(Shader.SL_GLSL, "shader/gradient.vert", "vis/shader/gradient.frag")
+                shader = Shader.load(Shader.SL_GLSL, "lblm/shader/gradient.vert", "lblm/shader/gradient.frag")
                 if shader:
                     self.actor.setShader(shader)
                 else:

@@ -1,12 +1,11 @@
 import os
 import threading
 from multiprocessing import Queue, Event
-
-import lmstudio as lms
 import numpy as np
+from llama_cpp import Llama, ChatCompletionRequestSystemMessage, ChatCompletionRequestUserMessage
 
-from animations import load_animations
-from model import BodyModel
+from .animations import load_animations
+from .body_model import BodyModel
 
 PROMPT = \
     """
@@ -28,7 +27,7 @@ class Brain(threading.Thread):
         self.is_outputting_event = Event()
 
         # options
-        self.options = load_animations(base_path="animations", animation_folder="GLBs")
+        self.options = load_animations(animations_path="lblm/data/animations")
         self.vectors = self.load_vectors()
 
         self.prompt = PROMPT.format(options=", ".join(self.options))
@@ -55,16 +54,16 @@ class Brain(threading.Thread):
         return best_key
 
     @staticmethod
-    def load_vectors():
+    def load_vectors(path="lblm/data/search_space"):
         """
         Loads all saved vectors from the saved vectors folder.
         :return:
         """
         arrays = {}
-        for filename in os.listdir("animations/vectors"):
+        for filename in os.listdir(path):
             if filename.endswith('.npy'):
                 key = os.path.splitext(filename)[0]
-                full_path = os.path.join("animations/vectors", filename)
+                full_path = os.path.join(path, filename)
                 array = np.load(full_path, allow_pickle=True)
                 arrays[key] = BodyModel(data=array).get_angle_vector()
         print(f"Loaded {len(arrays.keys())} vectors")
@@ -72,20 +71,41 @@ class Brain(threading.Thread):
         return arrays
 
     def run(self):
-        self.is_outputting_event.set()
-        model = lms.llm("google/gemma-3-4b")
-        while True:
-            value = self.input_queue.get()
-            print("Received input: ", value)
-            array = value.landmarks
-            if np.any(array):
-                vec = BodyModel(data=array).get_angle_vector()
-                closest_match = self.find_most_similar_vector(vec, similarity='cosine')
-                print(f"Closest match: {closest_match}")
-                chat = lms.Chat(self.prompt)
-                chat.add_user_message("The user made a gesture that you interpret with: " + closest_match)
-                response = model.respond(chat)
-                result = response.content
-                words = [word.strip() for word in result.split(',') if word.strip() and word.strip() in self.options]
-                for word in words:
-                    self.output_queue.put(word)
+        try:
+            self.is_outputting_event.set()
+
+            llm = Llama.from_pretrained(
+                repo_id="unsloth/DeepSeek-R1-0528-Qwen3-8B-GGUF",
+                filename="DeepSeek-R1-0528-Qwen3-8B-Q8_0.gguf",
+            )
+
+            while True:
+                value = self.input_queue.get()
+                print("Received input: ", value)
+                array = value.landmarks
+                if np.any(array):
+                    vec = BodyModel(data=array).get_angle_vector()
+                    closest_match = self.find_most_similar_vector(vec, similarity='cosine')
+                    print(f"Closest match: {closest_match}")
+
+
+                    system_prompt:ChatCompletionRequestSystemMessage = {"role": "system", "content": self.prompt.format(options=", ".join(self.options))}
+                    user_message:ChatCompletionRequestUserMessage = {"role": "user", "content": "The user made a gesture that you interpret with: " + closest_match}
+
+                    print("Starting Completion")
+                    response = llm.create_chat_completion(
+                        top_p=0.95,
+                        temperature=0.7,
+                        max_tokens=50,
+                        messages=[
+                            system_prompt,
+                            user_message
+                        ]
+                    )
+                    result = response.choices[0].message.content
+                    print(f"LBLM Response: {result}")
+                    words = [word.strip() for word in result.split(',') if word.strip() and word.strip() in self.options]
+                    for word in words:
+                        self.output_queue.put(word)
+        except Exception as _:
+            print(f"Brain Freeze")
