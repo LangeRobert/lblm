@@ -45,3 +45,8 @@ Also thank you to the wonderful people that have built the great software used i
 [MediaPipe](https://ai.google.dev/edge/mediapipe/solutions/guide), 
 [The HuggingFace Community](https://huggingface.co/), 
 [Panda3D](https://www.panda3d.org/) and [Mixamo](https://www.mixamo.com/).
+
+
+### Legal
+Please note that this project is for educational/artistic purposes only and not for commercial use.
+Look at the [LICENSE](LICENSE) file for more information.
