@@ -82,15 +82,19 @@ class Visualizer(Process):
                  options,
                  queue: Queue,
                  is_outputting_event: Event,
+                 light: bool = False,
+                 loop: bool = False
                  ):
         super().__init__()
         self.options = options
         self.queue = queue
         self.is_outputting_event = is_outputting_event
+        self.light = light
+        self.loop = loop
 
     def run(self):
         try:
-            vis = _Visualizer(self.options, self.queue, self.is_outputting_event)
+            vis = _Visualizer(self.options, self.queue, self.is_outputting_event, light=self.light, loop=self.loop)
             vis.start()
         except Exception as e:
             print(f"Error in visualizer process: {e}")
@@ -99,18 +103,22 @@ class Visualizer(Process):
 
 
 class _Visualizer(ShowBase):
-    def __init__(self, options, queue: Queue, is_outputting_event: Event, actor_path="lblm/data/character.glb"):
+    def __init__(self, options, queue: Queue, is_outputting_event: Event, actor_path="lblm/data/character.glb", light: bool = False,loop: bool = False):
         try:
             ShowBase.__init__(self)
             self.queue = queue
             self.is_outputting_event = is_outputting_event
+            self.loop = loop
 
             # init the animations and the base animation
             self.current_anim_index = 0
             print(f"Available animations: {list(options.keys())}")
 
             self.disableMouse()
-            self.set_background_color(0, 0, 0, 1)
+            if light:
+                self.set_background_color(1, 1, 1, 1)
+            else:
+                self.set_background_color(0, 0, 0, 1)
 
             # Load GLB model with rig
             self.animations = options
@@ -131,7 +139,10 @@ class _Visualizer(ShowBase):
 
             # Load and apply the shader
             try:
-                shader = Shader.load(Shader.SL_GLSL, "lblm/shader/gradient.vert", "lblm/shader/gradient.frag")
+                if light:
+                    shader = Shader.load(Shader.SL_GLSL, "lblm/shader/gradient.vert", "lblm/shader/light/gradient.frag")
+                else:
+                    shader = Shader.load(Shader.SL_GLSL, "lblm/shader/gradient.vert", "lblm/shader/dark/gradient.frag")
                 if shader:
                     self.actor.setShader(shader)
                 else:
@@ -155,7 +166,7 @@ class _Visualizer(ShowBase):
             bounds = self.actor.getTightBounds()
             if bounds:
                 center = (bounds[0] + bounds[1]) * 0.5
-                cam_dist = 3  # How far in front of the model
+                cam_dist = 2.2  # How far in front of the model
                 self.camera.setPos(center.getX(), center.getY() - cam_dist, center.getZ())
                 self.camera.lookAt(center)
             else:
@@ -169,7 +180,20 @@ class _Visualizer(ShowBase):
             traceback.print_exc()
             sys.exit(1)
 
-    def animate(self, task: Task):
+    def loop_task(self, task: Task):
+        """
+        Just loops through the animations
+        """
+        new_animation = list(self.animations.keys())[self.current_anim_index]
+        self.actor.loop(new_animation)
+        print(f"Playing animation {self.current_anim_index}/{len(self.animations)}")
+        self.current_anim_index = (self.current_anim_index + 1) % len(self.animations)
+        duration = self.actor.getDuration(new_animation)
+        self.taskMgr.doMethodLater(duration, self.loop_task, "LoopTask")
+        return Task.done
+
+
+    def animate_task(self, task: Task):
         try:
             from_anim = list(self.animations.keys())[self.current_anim_index]
 
@@ -223,7 +247,10 @@ class _Visualizer(ShowBase):
     def start(self):
         try:
             # Schedule animation switching immediately
-            self.taskMgr.doMethodLater(0, self.animate, "AnimateTask")
+            if self.loop:
+                self.taskMgr.doMethodLater(0, self.loop_task, "LoopTask")
+            else:
+                self.taskMgr.doMethodLater(0, self.animate_task, "AnimateTask")
             # Start the main loop
             self.run()
         except Exception as e:
