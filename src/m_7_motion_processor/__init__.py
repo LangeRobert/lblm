@@ -1,0 +1,1 @@
+"""Motion processor module contracts."""

@@ -1,0 +1,1 @@
+"""Motion segmenter module contracts."""

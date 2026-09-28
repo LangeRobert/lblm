@@ -1,0 +1,1 @@
+"""Pose normalizer module contracts."""

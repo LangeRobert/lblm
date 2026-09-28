@@ -1,0 +1,1 @@
+"""Pose estimator module contracts."""
