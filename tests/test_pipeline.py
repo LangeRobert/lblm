@@ -28,6 +28,7 @@ async def test_conversation_routes_action_and_closes_streams() -> None:
     renderer.get_rig = AsyncMock(return_value=CANONICAL_RIG)
     renderer.submit = AsyncMock()
     renderer.cancel = AsyncMock()
+    renderer.publish_event = AsyncMock()
 
     async def reply(request: DialogueRequest) -> AsyncGenerator[DialogueChunk]:
         """Supply a streamed dialogue response at the native model boundary."""
@@ -90,13 +91,13 @@ async def test_conversation_routes_action_and_closes_streams() -> None:
     )
     await pipeline.reply_to(segment)
     assert [event.kind for event in events] == [
-        "stage",
         "observation",
         "text",
         "reaction",
         "response_done",
     ]
-    assert events[3].text == "Wave back."
+    assert events[2].text == "Wave back."
+    assert [call.args[0] for call in renderer.publish_event.await_args_list] == events
     assert renderer.submit.await_count == 1
     request = renderer.submit.call_args.args[0]
     assert request.chunk.is_final and len(request.chunk.frames[0].bones) == 22
@@ -132,6 +133,8 @@ async def test_worker_failure_closes_camera_stream_and_every_open_stage() -> Non
         stage = MagicMock()
         stage.open = AsyncMock()
         stage.close = AsyncMock()
+        stage.publish_event = AsyncMock()
+        stage.publish_frame = AsyncMock()
         stages[name] = stage
 
     async def frames() -> AsyncGenerator[CameraFrame]:
@@ -146,11 +149,10 @@ async def test_worker_failure_closes_camera_stream_and_every_open_stage() -> Non
 
     stages["camera"].frames = frames
     stages["estimator"].estimate = AsyncMock(side_effect=ValueError("pose failure"))
-    observed = []
-    pipeline = ConversationPipeline(**stages, on_frame=observed.append)
+    pipeline = ConversationPipeline(**stages)
     with pytest.raises(ExceptionGroup, match="TaskGroup"):
         await pipeline.run()
     assert closed == ["stream"]
-    assert len(observed) == 1 and observed[0].frame_id == 0
+    stages["renderer"].publish_frame.assert_awaited_once()
     for stage in stages.values():
         stage.close.assert_awaited_once()

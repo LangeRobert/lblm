@@ -1,18 +1,23 @@
 """Owned Godot process with an authenticated loopback playback connection."""
 
 import asyncio
+import base64
 import json
 import secrets
 import shutil
 import time
+from functools import partial
 from pathlib import Path
 from typing import Any
 
 from pydantic import Field
 
 from src.contract import ContractModel
+from src.events import PipelineEvent
+from src.m_0_camera.contract import CameraFrame
 from src.m_8_skeleton_retargeter.contract import HumanoidRig
 from src.m_9_renderer.contract import PlaybackRequest, Renderer
+from src.runtime import run_blocking
 from src.skeleton import CANONICAL_RIG
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -23,6 +28,7 @@ class GodotConfig(ContractModel):
 
     executable: str | None = None
     project_path: Path = PROJECT_ROOT / "godot"
+    avatar_path: Path = PROJECT_ROOT / "models/mixamo-t-pose.fbx"
     headless: bool = False
     timeout_s: float = Field(default=15.0, gt=0, le=120)
 
@@ -46,6 +52,7 @@ class GodotRenderer(Renderer):
         self._token = ""
         self._offset = 0.0
         self._lock = asyncio.Lock()
+        self._last_preview_at = -float("inf")
 
     async def _accept(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         """Authenticate the one engine connection and reject other peers.
@@ -75,7 +82,7 @@ class GodotRenderer(Renderer):
                 await writer.wait_closed()
 
     async def open(self) -> None:
-        """Launch the engine, transfer its rig and synchronize monotonic clocks.
+        """Validate the avatar, launch Godot, and synchronize playback clocks.
 
         :returns: None after the scene acknowledges readiness.
         """
@@ -92,6 +99,11 @@ class GodotRenderer(Renderer):
                     break
         if executable is None:
             raise FileNotFoundError("Install Godot 4.5+ or supply --godot /path/to/Godot")
+        avatar_path = self.config.avatar_path.resolve()
+        if not avatar_path.is_file():
+            raise FileNotFoundError(f"Avatar model not found: {avatar_path}")
+        if avatar_path.suffix.lower() not in (".fbx", ".glb", ".gltf"):
+            raise ValueError("Avatar must be a Mixamo-rigged FBX, GLB or glTF file")
         self._token = secrets.token_urlsafe(32)
         try:
             self._server = await asyncio.start_server(self._accept, "127.0.0.1", 0, limit=262144)
@@ -106,7 +118,13 @@ class GodotRenderer(Renderer):
             async with asyncio.timeout(self.config.timeout_s):
                 self._reader, self._writer = await self._connections.get()
             self._server.close()
-            await self._exchange({"command": "init", "rig": CANONICAL_RIG.model_dump(mode="json")})
+            await self._exchange(
+                {
+                    "command": "init",
+                    "rig": CANONICAL_RIG.model_dump(mode="json"),
+                    "avatar_path": str(avatar_path),
+                }
+            )
             before = time.monotonic()
             reply = await self._exchange({"command": "ping"})
             self._offset = float(reply["engine_time_s"]) - (before + time.monotonic()) / 2
@@ -170,6 +188,56 @@ class GodotRenderer(Renderer):
             if time.monotonic() > deadline:
                 raise TimeoutError("Godot playback queue remained full")
             await asyncio.sleep(0.02)
+
+    async def publish_event(self, event: PipelineEvent) -> None:
+        """Forward dialogue through the authenticated, bounded playback transport.
+
+        :param event: Ordered conversation update for the companion window.
+        :returns: None after the engine acknowledges receipt.
+        """
+        await self._exchange({"command": "event", "event": event.model_dump(mode="json")})
+
+    async def publish_frame(self, frame: CameraFrame) -> None:
+        """Send a resized JPEG preview at most ten times per second over loopback.
+
+        :param frame: Packed captured pixels; never persisted or sent off-device.
+        :returns: None after acknowledgement, or immediately for skipped previews.
+        :raises ValueError: If input pixels or JPEG encoding are invalid.
+        """
+        now = time.monotonic()
+        if self.config.headless or now - self._last_preview_at < 0.1:
+            return
+        self._last_preview_at = now
+        import cv2
+        import numpy as np
+
+        channels = 4 if frame.pixel_format == "rgba8" else 3
+        if len(frame.data) != frame.width * frame.height * channels:
+            raise ValueError("Preview pixel count does not match frame dimensions")
+        pixels = np.frombuffer(frame.data, dtype=np.uint8).reshape(
+            frame.height, frame.width, channels
+        )
+        if frame.pixel_format == "rgb8":
+            pixels = np.asarray(cv2.cvtColor(pixels, cv2.COLOR_RGB2BGR), dtype=np.uint8)
+        elif frame.pixel_format == "rgba8":
+            pixels = np.asarray(cv2.cvtColor(pixels, cv2.COLOR_RGBA2BGR), dtype=np.uint8)
+        scale = min(1.0, 480 / max(frame.width, frame.height))
+        if scale < 1:
+            pixels = np.asarray(
+                cv2.resize(
+                    pixels,
+                    (max(1, round(frame.width * scale)), max(1, round(frame.height * scale))),
+                    interpolation=cv2.INTER_AREA,
+                ),
+                dtype=np.uint8,
+            )
+        encoded, jpeg = await run_blocking(
+            partial(cv2.imencode, ".jpg", pixels, [cv2.IMWRITE_JPEG_QUALITY, 70])
+        )
+        if not encoded:
+            raise ValueError("Camera preview JPEG encoding failed")
+        await self._exchange({"command": "camera", "jpeg": base64.b64encode(jpeg).decode("ascii")})
+        self._last_preview_at = time.monotonic()
 
     async def cancel(self, response_id: str) -> None:
         """Remove all queued frames and stop the matching response.

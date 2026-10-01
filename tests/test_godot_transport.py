@@ -1,11 +1,14 @@
 """Backend transport validation without interface or scene assertions."""
 
 import asyncio
+import base64
 import json
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
+from src.m_0_camera.contract import CameraFrame
 from src.m_8_skeleton_retargeter.contract import RigFrame, RigMotionChunk
 from src.m_9_renderer.contract import PlaybackRequest
 from src.skeleton import CANONICAL_RIG
@@ -61,12 +64,49 @@ async def test_renderer_transport_schedules_and_cancels() -> None:
             is_final=True,
         )
         await renderer.submit(PlaybackRequest(chunk=chunk, play_at_s=1.0))
+        from src.pipeline import PipelineEvent
+
+        await renderer.publish_event(PipelineEvent(kind="text", text="Hello", response_id="r"))
+        frame = CameraFrame(
+            frame_id=0,
+            captured_at_s=0,
+            width=800,
+            height=600,
+            pixel_format="rgb8",
+            data=bytes([255, 0, 0]) * (800 * 600),
+        )
+        await renderer.publish_frame(frame)
+        await renderer.publish_frame(frame)
         await renderer.cancel("r")
         await renderer.close()
         await renderer.close()
     await asyncio.gather(*tasks)
-    assert [m["command"] for m in received] == ["init", "ping", "submit", "cancel"]
+    assert [m["command"] for m in received] == [
+        "init",
+        "ping",
+        "submit",
+        "event",
+        "camera",
+        "cancel",
+    ]
+    assert received[0]["avatar_path"] == str(
+        Path(__file__).resolve().parents[1] / "models/mixamo-t-pose.fbx"
+    )
     assert received[2]["request"]["chunk"]["response_id"] == "r"
-    assert received[3]["response_id"] == "r"
+    assert received[3]["event"] == {
+        "kind": "text",
+        "text": "Hello",
+        "response_id": "r",
+        "elapsed_s": 0.0,
+    }
+    import cv2
+    import numpy as np
+
+    pixels = cv2.imdecode(
+        np.frombuffer(base64.b64decode(received[4]["jpeg"]), dtype=np.uint8), cv2.IMREAD_COLOR
+    )
+    assert pixels.shape == (360, 480, 3)
+    assert pixels[0, 0, 2] > 240 and pixels[0, 0, 0] < 10
+    assert received[5]["response_id"] == "r"
     with pytest.raises(RuntimeError):
         await renderer.get_rig()

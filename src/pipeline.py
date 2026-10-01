@@ -4,14 +4,14 @@ import asyncio
 import time
 from collections.abc import Callable
 from contextlib import AsyncExitStack, aclosing, suppress
-from typing import Literal
 from uuid import uuid4
 
 from pydantic import Field
 
 from src.contract import ContractModel
+from src.events import PipelineEvent
 from src.m_0_camera.contract import Camera, CameraFrame
-from src.m_1_pose_estimator.contract import PoseEstimate, PoseEstimator
+from src.m_1_pose_estimator.contract import PoseEstimator
 from src.m_2_pose_normalizer.contract import PoseNormalizer
 from src.m_3_motion_segmenter.contract import MotionSegment, MotionSegmenter
 from src.m_4_motion_to_language.contract import MotionToLanguage
@@ -21,6 +21,8 @@ from src.m_7_motion_processor.contract import MotionProcessor
 from src.m_8_skeleton_retargeter.contract import SkeletonRetargeter
 from src.m_9_renderer.contract import PlaybackRequest, Renderer
 from src.skeleton import CANONICAL_SKELETON
+
+__all__ = ["ConversationPipeline", "PipelineConfig", "PipelineEvent", "replace_latest"]
 
 
 class PipelineConfig(ContractModel):
@@ -34,15 +36,6 @@ class PipelineConfig(ContractModel):
     playback_buffer_s: float = Field(default=0.1, ge=0, le=1)
     history_pairs: int = Field(default=3, ge=0, le=10)
     repeat_cooldown_s: float = Field(default=5.0, ge=0)
-
-
-class PipelineEvent(ContractModel):
-    """Structured terminal or application notifications without camera pixels."""
-
-    kind: Literal["ready", "observation", "text", "reaction", "response_done", "tracking", "stage"]
-    text: str = ""
-    response_id: str = ""
-    elapsed_s: float = 0.0
 
 
 def replace_latest[T](queue: asyncio.Queue[T], value: T) -> None:
@@ -75,8 +68,6 @@ class ConversationPipeline:
         renderer: Renderer,
         config: PipelineConfig | None = None,
         on_event: Callable[[PipelineEvent], None] | None = None,
-        on_frame: Callable[[CameraFrame], None] | None = None,
-        on_pose: Callable[[CameraFrame, PoseEstimate], None] | None = None,
     ) -> None:
         """Attach injectable implementations of each pipeline contract.
 
@@ -92,8 +83,6 @@ class ConversationPipeline:
         :param renderer: Engine playback transport.
         :param config: Conversation and latency policy.
         :param on_event: Optional synchronous progress callback.
-        :param on_frame: Optional main-thread observer for captured input frames.
-        :param on_pose: Optional observer receiving matching pixels and detected landmarks.
         """
         self.camera, self.estimator, self.normalizer = camera, estimator, normalizer
         self.segmenter, self.captioner, self.llm = segmenter, captioner, llm
@@ -105,9 +94,6 @@ class ConversationPipeline:
         )
         self.config = config or PipelineConfig()
         self.on_event = on_event
-        self.on_frame = on_frame
-        self.on_pose = on_pose
-        self._last_tracking_log = -float("inf")
         self.history: tuple[ChatMessage, ...] = ()
         self._frames: asyncio.Queue[CameraFrame | None] = asyncio.Queue(maxsize=1)
         self._segments: asyncio.Queue[MotionSegment | None] = asyncio.Queue(maxsize=1)
@@ -116,6 +102,16 @@ class ConversationPipeline:
         self._last_reply = -float("inf")
         self._play_until = 0.0
         self._reply_lock = asyncio.Lock()
+
+    async def emit_event(self, event: PipelineEvent) -> None:
+        """Deliver ordered dialogue updates to the renderer and optional observer.
+
+        :param event: Camera-free conversation notification.
+        :returns: None after the display acknowledges the update.
+        """
+        await self.renderer.publish_event(event)
+        if self.on_event:
+            self.on_event(event)
 
     async def run(self) -> None:
         """Open all stages, run bounded workers, then close resources in reverse order.
@@ -137,13 +133,12 @@ class ConversationPipeline:
             ):
                 stack.push_async_callback(module.close)
                 await module.open()
-            if self.on_event:
-                self.on_event(
-                    PipelineEvent(
-                        kind="ready",
-                        text="Camera and models ready. Keep shoulders, elbows and wrists in view.",
-                    )
+            await self.emit_event(
+                PipelineEvent(
+                    kind="ready",
+                    text="Camera and models ready. Keep shoulders, elbows and wrists in view.",
                 )
+            )
             async with asyncio.TaskGroup() as group:
                 group.create_task(self.capture(), name="camera")
                 group.create_task(self.observe(), name="pose")
@@ -151,7 +146,7 @@ class ConversationPipeline:
             await asyncio.sleep(max(0.0, self._play_until - time.monotonic()))
 
     async def capture(self) -> None:
-        """Drain the camera at a bounded rate, replacing stale unprocessed images.
+        """Preview captured input and replace stale unprocessed images at a bounded rate.
 
         :returns: None after placing an EOF sentinel behind the last frame.
         """
@@ -159,8 +154,7 @@ class ConversationPipeline:
         next_capture = time.monotonic()
         async with aclosing(stream):
             async for frame in stream:
-                if self.on_frame:
-                    self.on_frame(frame)
+                await self.renderer.publish_frame(frame)
                 replace_latest(self._frames, frame)
                 next_capture = max(next_capture + 1 / self.config.capture_rate_hz, time.monotonic())
                 await asyncio.sleep(max(0.0, next_capture - time.monotonic()))
@@ -173,47 +167,7 @@ class ConversationPipeline:
         """
         while (frame := await self._frames.get()) is not None:
             estimate = await self.estimator.estimate(frame)
-            if self.on_pose:
-                self.on_pose(frame, estimate)
             pose = await self.normalizer.normalize(estimate)
-            if self.on_event and time.monotonic() - self._last_tracking_log >= 2.0:
-                self._last_tracking_log = time.monotonic()
-                if estimate.pose is None:
-                    status = "No person detected. Move into view and check lighting."
-                elif pose.pose is None:
-                    status = "Pose detected, but calibration needs visible shoulders or hips."
-                else:
-                    missing = [
-                        j.name
-                        for j, o in zip(pose.skeleton.joints, pose.pose.joints, strict=True)
-                        if o.position is None or o.confidence <= 0
-                    ]
-                    arms = [
-                        name
-                        for name in missing
-                        if name
-                        in (
-                            "left_shoulder",
-                            "right_shoulder",
-                            "left_elbow",
-                            "right_elbow",
-                            "left_wrist",
-                            "right_wrist",
-                        )
-                    ]
-                    if arms:
-                        status = (
-                            "Waiting for arm joints: "
-                            + ", ".join(arms)
-                            + ". Keep both arms in view."
-                        )
-                    elif missing:
-                        status = f"Upper-body tracking: {22 - len(missing)}/22 joints; collecting visible-arm motion."
-                    else:
-                        status = "Full-body tracking: 22/22 joints; collecting motion."
-                self.on_event(
-                    PipelineEvent(kind="tracking", text=f"Frame {frame.frame_id}: {status}")
-                )
             for segment in await self.segmenter.push(pose):
                 replace_latest(self._segments, segment)
         for segment in await self.segmenter.flush():
@@ -236,13 +190,6 @@ class ConversationPipeline:
         """
         async with self._reply_lock:
             started = time.monotonic()
-            if self.on_event:
-                self.on_event(
-                    PipelineEvent(
-                        kind="stage",
-                        text=f"Captioning {len(segment.frames)} frames ({segment.frames[-1].captured_at_s - segment.frames[0].captured_at_s:.2f}s).",
-                    )
-                )
             observation = await self.captioner.describe(segment)
             if (
                 observation.text == self._last_caption
@@ -254,12 +201,9 @@ class ConversationPipeline:
                 await self.renderer.cancel(self._response)
             response_id = str(uuid4())
             self._response = response_id
-            if self.on_event:
-                self.on_event(
-                    PipelineEvent(
-                        kind="observation", text=observation.text, response_id=response_id
-                    )
-                )
+            await self.emit_event(
+                PipelineEvent(kind="observation", text=observation.text, response_id=response_id)
+            )
             text = ""
             action: str | None = None
             try:
@@ -275,18 +219,17 @@ class ConversationPipeline:
                         text += delta.text_delta
                         if delta.motion_prompt:
                             action = delta.motion_prompt
-                        if delta.text_delta and self.on_event:
-                            self.on_event(
+                        if delta.text_delta:
+                            await self.emit_event(
                                 PipelineEvent(
                                     kind="text", text=delta.text_delta, response_id=response_id
                                 )
                             )
                 if not action:
                     raise ValueError("Language model did not produce a complete motion prompt")
-                if self.on_event:
-                    self.on_event(
-                        PipelineEvent(kind="reaction", text=action, response_id=response_id)
-                    )
+                await self.emit_event(
+                    PipelineEvent(kind="reaction", text=action, response_id=response_id)
+                )
                 await self.processor.reset()
                 rig = await self.renderer.get_rig()
                 motion_request = MotionRequest(
@@ -316,14 +259,13 @@ class ConversationPipeline:
                             ChatMessage(role="assistant", text=text or action),
                         )
                     )[-2 * self.config.history_pairs :]
-                if self.on_event:
-                    self.on_event(
-                        PipelineEvent(
-                            kind="response_done",
-                            response_id=response_id,
-                            elapsed_s=time.monotonic() - started,
-                        )
+                await self.emit_event(
+                    PipelineEvent(
+                        kind="response_done",
+                        response_id=response_id,
+                        elapsed_s=time.monotonic() - started,
                     )
+                )
             except BaseException:
                 with suppress(ConnectionError, RuntimeError, TimeoutError, ValueError):
                     await self.renderer.cancel(response_id)

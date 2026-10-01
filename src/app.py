@@ -3,9 +3,7 @@
 from collections.abc import Callable
 
 from src.contract import ContractModel
-from src.m_0_camera.contract import CameraFrame
 from src.m_0_camera.open_cv import OpenCVCamera, OpenCVConfig
-from src.m_1_pose_estimator.contract import PoseEstimate
 from src.m_1_pose_estimator.mediapipe import MediaPipeConfig, MediaPipePoseEstimator
 from src.m_2_pose_normalizer.canonical import CanonicalPoseNormalizer
 from src.m_3_motion_segmenter.window import SegmenterConfig, WindowMotionSegmenter
@@ -36,15 +34,11 @@ class AppConfig(ContractModel):
 def create_pipeline(
     config: AppConfig,
     on_event: Callable[[PipelineEvent], None] | None = None,
-    on_frame: Callable[[CameraFrame], None] | None = None,
-    on_pose: Callable[[CameraFrame, PoseEstimate], None] | None = None,
 ) -> ConversationPipeline:
     """Compose the ten stages with one shared MotionGPT model allocation.
 
     :param config: Validated application configuration.
     :param on_event: Optional UI or terminal progress callback.
-    :param on_frame: Optional main-thread input preview callback.
-    :param on_pose: Optional callback for synchronized input and landmark overlays.
     :returns: Unopened, fully wired conversation pipeline.
     """
     runtime = MotionGPTRuntime(config.motiongpt)
@@ -61,6 +55,4 @@ def create_pipeline(
         renderer=GodotRenderer(config.renderer),
         config=config.pipeline,
         on_event=on_event,
-        on_frame=on_frame,
-        on_pose=on_pose,
     )

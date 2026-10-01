@@ -12,3 +12,8 @@
 LBLM overrides all materials with matte white at runtime, reconstructs the skin
 bind pose, and drives its bones from streamed canonical motion. These runtime
 adaptations are in `../humanoid.gd`; the bundled source model is unchanged.
+
+## Poppins
+
+Poppins Regular is bundled from [Google Fonts](https://github.com/google/fonts/tree/main/ofl/poppins).
+It is distributed under the SIL Open Font License 1.1; see `POPPINS-LICENSE.txt`.

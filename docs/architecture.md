@@ -79,8 +79,8 @@ preserving fixed rig lengths. It emits absolute parent-local translations and
 unit quaternions. It supports the included canonical identity-rest rig; arbitrary
 bind orientations or topologies are rejected. Leaf twist is inherited.
 
-Godot owns the bundled Mannequiny humanoid, lighting and playback. Python starts an
-owned process, authenticates its loopback TCP connection, sends the rig and
+Godot owns the supplied Mixamo FBX humanoid, lighting and playback. Python starts an
+owned process, authenticates its loopback TCP connection, sends the canonical rig and local avatar path, and
 measures the monotonic clock offset. Godot bounds its queue, validates chunk order,
 interpolates translations/rotations at display rate and blends into new responses.
 [Transport and renderer details](godot.md).
@@ -89,13 +89,13 @@ interpolates translations/rotations at display rate and blends into new response
 
 Payloads are immutable Pydantic models with strict field types, finite numbers
 and forbidden extra fields. Concrete stages enforce their relational invariants.
-Stream contracts use closable async generators. Camera bytes stay within capture
-and pose estimation; later stages receive only landmarks or text. Downloads occur
+Stream contracts use closable async generators. Camera bytes feed pose estimation and a bounded local JPEG preview in the
+companion window; model stages after pose estimation receive only landmarks or text. Downloads occur
 on first model open and use pinned Hugging Face revisions. No cloud inference or
 image persistence is part of the live pipeline.
 
-The bundled Mannequiny GLB has a dedicated bind-pose adapter; arbitrary avatar
-rigs are not supported. There is no foot-contact IK, finger/facial animation,
+The supplied Mixamo FBX has a dedicated bind-pose adapter with all 22 canonical
+joints mapped and finger/end bones preserved; arbitrary non-Mixamo rigs are not supported. There is no foot-contact IK, finger/facial animation,
 robust person reidentification or learned
 turn-taking policy. Body-language captions describe model predictions, not reliable
 emotion, intent or sign-language translation. A static pose fixture was captioned

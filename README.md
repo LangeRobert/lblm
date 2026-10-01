@@ -2,8 +2,8 @@
 
 A local Python 3.13+ camera → body motion → conversation → animated humanoid
 application. All ten stages have concrete implementations behind typed Pydantic
-contracts. Godot 4 displays a bundled white, skinned humanoid in a frontal view on a black
-background. No separate avatar download is required.
+contracts. Godot 4 displays the supplied Mixamo mannequin in matte white, viewed from the
+front on black. The local avatar file is `models/mixamo-t-pose.fbx`.
 
 ## Run
 
@@ -12,8 +12,6 @@ From this directory on Apple silicon:
 ```bash
 CMAKE_ARGS="-DGGML_METAL=on" uv sync --all-extras --group dev
 uv run --all-extras python main.py
-# Preview camera input and color detected input/reaction diagnostics:
-uv run --all-extras python main.py --debug
 ```
 
 Godot is discovered on `PATH`, in `/Applications/Godot.app`, or in the local
@@ -43,13 +41,32 @@ MediaPipe to avoid two packages overwriting `cv2`.
 `src/app.py`. CLI overrides include `--camera 0`, `--prompt "..."`, `--seconds 60`,
 `--godot`, `--headless`, and `--offline`. The time limit includes model startup. The CLI uses Click; `--help` lists all options.
 
-`--debug` opens an OpenCV input window with detected joints and skeleton connections
-(green: visible, orange: uncertain), prints detected motion in green and the
-exact action sent to MotionGPT in blue. Every two seconds it reports tracking
-status and names missing arm joints; it also reports when captioning starts. Escape or closing the preview disables
-only that window; Ctrl-C stops the application. `--headless` hides Godot but does
-not hide the debug input window. `--demo --debug` prints colored diagnostics
-without an input window, because the demo uses synthetic motion rather than video.
+Godot opens two native windows side by side: the avatar visualizer and a portrait
+conversation window matching the supplied 1080×1920 design. The companion uses
+Poppins on black, a camera preview at upper left, and the stacked
+“Large body Language Model v2.0” title beneath it. The scrollable right column
+shows observed movement in white and streamed system replies in gray, without
+speaker labels or status headers. It retains the latest 100 messages and follows
+new text when you are near the bottom. Scroll up to read without being pulled down.
+The camera preview uses captured frames at up to 10 Hz, without landmarks or a
+second camera connection; a white block remains until the first frame arrives.
+`--headless` hides both windows and skips camera-preview encoding. Closing the
+conversation window hides it; closing the visualizer stops the session.
+There is no debug mode.
+
+## Avatar format
+
+The default avatar is `models/mixamo-t-pose.fbx`, loaded directly by Godot's
+FBXDocument without editor imports or conversion. The supplied FBX imports in
+meters; its Mixamo bone names map onto all 22 canonical joints. Fingers and end
+bones retain their bind pose, including bones without skin bindings.
+
+`renderer.avatar_path` in your JSON configuration can select another local
+Mixamo-rigged `.fbx`, `.glb` or `.gltf`. This adapter requires every canonical
+joint's corresponding Mixamo bone; arbitrary rigs are rejected. There is no file
+picker. The supplied model stays in the ignored `models` directory, so a fresh
+checkout needs that file or an explicit configured path. The older Mannequiny
+asset remains attributed in `godot/assets`, but is no longer the default rig.
 
 ## Stages
 
@@ -64,12 +81,14 @@ without an input window, because the demo uses synthetic motion rather than vide
 | 6 Animate | The same MotionGPT runtime, full-clip generation delivered in chunks |
 | 7 Process | Causal smoothing across chunk boundaries and stream validation |
 | 8 Retarget | Fixed-length humanoid bone rotations and parent-local transforms |
-| 9 Render | Godot Skeleton3D, interpolation, short entry blend and bounded TCP playback |
+| 9 Render | Godot Skeleton3D, interpolation, continuous waiting loop, blended transitions and bounded TCP playback |
 
 The orchestrator uses one-slot latest-frame and latest-segment mailboxes, bounded
 history, repeat-caption suppression, shared MotionGPT ownership and cancellation-safe
 cleanup. It finishes an active model response before consuming the newest pending
-window. Playback for the preceding response is cancelled when a new reply begins.
+window. Playback for the preceding response is cancelled when a new reply begins. Between
+responses the character relaxes its arms and loops subtle breathing and listening
+movements, blending back over 600 ms after completion or cancellation.
 
 ## Verification and limits
 

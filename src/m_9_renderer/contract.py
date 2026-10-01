@@ -3,6 +3,8 @@
 from abc import abstractmethod
 
 from src.contract import ContractModel, Identifier, PipelineModule, Seconds
+from src.events import PipelineEvent
+from src.m_0_camera.contract import CameraFrame
 from src.m_8_skeleton_retargeter.contract import HumanoidRig, RigMotionChunk
 
 
@@ -45,3 +47,17 @@ class Renderer(PipelineModule):
         :returns: None when obsolete animation can no longer be played.
         """
         ...
+
+    async def publish_event(self, event: PipelineEvent) -> None:
+        """Accept dialogue notifications; playback-only backends may ignore them.
+
+        :param event: Structured conversation update without captured pixels.
+        :returns: None after the backend accepts the update.
+        """
+
+    async def publish_frame(self, frame: CameraFrame) -> None:
+        """Accept live preview pixels; renderers without a preview may ignore them.
+
+        :param frame: Captured image shared with pose estimation.
+        :returns: None after accepting or dropping the preview frame.
+        """

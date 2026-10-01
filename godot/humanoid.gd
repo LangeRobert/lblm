@@ -1,13 +1,13 @@
 extends Node3D
-## Retarget canonical motion onto Mannequiny's skinned, meter-scale bind pose.
+## Retarget canonical motion onto a Mixamo skinned humanoid, retaining bind proportions.
 
 const BONE_MAP: Dictionary = {
-	"pelvis": "pelvis", "spine_01": "spine1", "spine_02": "spine3",
-	"neck_01": "neck", "head": "head",
-	"thigh.l": "left_hip", "calf.l": "left_knee", "foot.l": "left_ankle", "ball.l": "left_foot",
-	"thigh.r": "right_hip", "calf.r": "right_knee", "foot.r": "right_ankle", "ball.r": "right_foot",
-	"clavicle.l": "left_collar", "upperarm.l": "left_shoulder", "lowerarm.l": "left_elbow", "hand.l": "left_wrist",
-	"clavicle.r": "right_collar", "upperarm.r": "right_shoulder", "lowerarm.r": "right_elbow", "hand.r": "right_wrist",
+	"Hips": "pelvis", "Spine": "spine1", "Spine1": "spine2", "Spine2": "spine3",
+	"Neck": "neck", "Head": "head",
+	"LeftUpLeg": "left_hip", "LeftLeg": "left_knee", "LeftFoot": "left_ankle", "LeftToeBase": "left_foot",
+	"RightUpLeg": "right_hip", "RightLeg": "right_knee", "RightFoot": "right_ankle", "RightToeBase": "right_foot",
+	"LeftShoulder": "left_collar", "LeftArm": "left_shoulder", "LeftForeArm": "left_elbow", "LeftHand": "left_wrist",
+	"RightShoulder": "right_collar", "RightArm": "right_shoulder", "RightForeArm": "right_elbow", "RightHand": "right_wrist",
 }
 const FACING: Basis = Basis(Vector3.UP, PI)
 var body: Skeleton3D
@@ -16,12 +16,17 @@ var bind_global: Array[Transform3D] = []
 var source_bones: PackedInt32Array = []
 
 
-func configure(source: Skeleton3D) -> Error:
-	## Load the bundled GLB without editor imports and restore its actual skin bind pose.
+func configure(source: Skeleton3D, asset_path: String) -> Error:
+	## Load FBX or glTF directly and recover skin binds without discarding end bones.
 	driver = source
-	var document := GLTFDocument.new()
-	var state := GLTFState.new()
-	var result: Error = document.append_from_file("res://assets/mannequiny.glb", state)
+	if not FileAccess.file_exists(asset_path):
+		return ERR_FILE_NOT_FOUND
+	var extension: String = asset_path.get_extension().to_lower()
+	if extension not in ["fbx", "glb", "gltf"]:
+		return ERR_FILE_UNRECOGNIZED
+	var document: GLTFDocument = FBXDocument.new() if extension == "fbx" else GLTFDocument.new()
+	var state: GLTFState = FBXState.new() if extension == "fbx" else GLTFState.new()
+	var result: Error = document.append_from_file(asset_path, state)
 	if result != OK:
 		return result
 	var model: Node3D = document.generate_scene(state)
@@ -44,9 +49,11 @@ func configure(source: Skeleton3D) -> Error:
 			node.material_override = material
 			if node.skin != null:
 				skin = node.skin
-	if body == null or skin == null or skin.get_bind_count() != body.get_bone_count():
+	if body == null or skin == null or skin.get_bind_count() == 0:
 		return ERR_INVALID_DATA
 	bind_global.resize(body.get_bone_count())
+	for i: int in range(body.get_bone_count()):
+		bind_global[i] = body.get_bone_global_rest(i)
 	for i: int in range(skin.get_bind_count()):
 		var bone: int = skin.get_bind_bone(i)
 		if not skin.get_bind_name(i).is_empty():
@@ -60,7 +67,13 @@ func configure(source: Skeleton3D) -> Error:
 		if parent >= 0:
 			rest = bind_global[parent].affine_inverse() * rest
 		body.set_bone_rest(i, rest)
-		source_bones.append(driver.find_bone(str(BONE_MAP.get(body.get_bone_name(i), ""))))
+		var bone_name: String = body.get_bone_name(i)
+		bone_name = bone_name.get_slice(":", bone_name.get_slice_count(":") - 1)
+		bone_name = bone_name.get_slice("_", bone_name.get_slice_count("_") - 1)
+		source_bones.append(driver.find_bone(str(BONE_MAP.get(bone_name, ""))))
+	for i: int in range(driver.get_bone_count()):
+		if not source_bones.has(i):
+			return ERR_INVALID_DATA
 	body.reset_bone_poses()
 	apply_pose()
 	return OK
