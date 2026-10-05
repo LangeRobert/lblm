@@ -16,11 +16,11 @@ from src.m_2_pose_normalizer.contract import PoseNormalizer
 from src.m_3_motion_segmenter.contract import MotionSegment, MotionSegmenter
 from src.m_4_motion_to_language.contract import MotionToLanguage
 from src.m_5_llm.contract import ChatMessage, DialogueRequest, LanguageModel
-from src.m_6_language_to_motion.contract import LanguageToMotion, MotionRequest
+from src.m_6_language_to_motion.contract import LanguageToMotion
 from src.m_7_motion_processor.contract import MotionProcessor
 from src.m_8_skeleton_retargeter.contract import SkeletonRetargeter
-from src.m_9_renderer.contract import PlaybackRequest, Renderer
-from src.skeleton import CANONICAL_SKELETON
+from src.m_9_renderer.contract import Renderer
+from src.playback import play_motion
 
 __all__ = ["ConversationPipeline", "PipelineConfig", "PipelineEvent", "replace_latest"]
 
@@ -230,27 +230,15 @@ class ConversationPipeline:
                 await self.emit_event(
                     PipelineEvent(kind="reaction", text=action, response_id=response_id)
                 )
-                await self.processor.reset()
-                rig = await self.renderer.get_rig()
-                motion_request = MotionRequest(
-                    response_id=response_id,
-                    prompt=action,
-                    skeleton=CANONICAL_SKELETON,
-                    duration_s=self.config.motion_duration_s,
-                    frame_rate_hz=self.config.frame_rate_hz,
+                self._play_until = await play_motion(
+                    action,
+                    response_id,
+                    generator=self.generator,
+                    processor=self.processor,
+                    retargeter=self.retargeter,
+                    renderer=self.renderer,
+                    config=self.config,
                 )
-                play_at: float | None = None
-                async with aclosing(self.generator.generate(motion_request)) as motion_stream:
-                    async for raw in motion_stream:
-                        for processed in await self.processor.process(raw):
-                            retargeted = await self.retargeter.retarget(processed, rig)
-                            if play_at is None:
-                                play_at = time.monotonic() + self.config.playback_buffer_s
-                            await self.renderer.submit(
-                                PlaybackRequest(chunk=retargeted, play_at_s=play_at)
-                            )
-                            if retargeted.frames:
-                                self._play_until = play_at + retargeted.frames[-1].time_s
                 if self.config.history_pairs:
                     self.history = (
                         self.history

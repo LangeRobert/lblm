@@ -12,6 +12,7 @@ from pydantic import ValidationError
 from src.app import AppConfig, create_pipeline
 from src.demo import waving_segment
 from src.pipeline import PipelineEvent
+from src.prompt import run_prompt
 
 
 def print_event(event: PipelineEvent) -> None:
@@ -28,14 +29,31 @@ def print_event(event: PipelineEvent) -> None:
         click.echo(event.text)
 
 
-async def run(config: AppConfig, *, demo: bool = False, seconds: float | None = None) -> None:
+async def run(
+    config: AppConfig,
+    *,
+    demo: bool = False,
+    prompt: bool = False,
+    seconds: float | None = None,
+) -> None:
     """Run the configured application or a camera-free model/render smoke demo.
 
     :param config: Validated backend and conversation settings.
     :param demo: Use a synthetic wave as the captioner's input.
+    :param prompt: Read terminal gestures directly without observation or dialogue.
     :param seconds: Optional live-session time limit after startup begins.
     :returns: None after all owned resources close.
     """
+    if prompt:
+        deadline = asyncio.timeout(seconds)
+        try:
+            async with deadline:
+                await run_prompt(config)
+        except TimeoutError:
+            if not deadline.expired():
+                raise
+            click.echo("\nSession time limit reached; resources closed.")
+        return
     pipeline = create_pipeline(config, on_event=print_event)
     if demo:
         async with AsyncExitStack() as stack:
@@ -92,7 +110,11 @@ async def run(config: AppConfig, *, demo: bool = False, seconds: float | None = 
     type=click.FloatRange(min=0, min_open=True),
     help="Maximum live run time including startup.",
 )
-@click.option("--prompt", help="Text prompt accompanying observed movement.")
+@click.option(
+    "--prompt",
+    is_flag=True,
+    help="Play gestures typed in the terminal; skip observation and dialogue.",
+)
 @click.option("--offline", is_flag=True, help="Require already cached model files.")
 def main(
     config_path: Path | None,
@@ -102,7 +124,7 @@ def main(
     headless: bool,
     demo: bool,
     seconds: float | None,
-    prompt: str | None,
+    prompt: bool,
     offline: bool,
 ) -> None:
     """Run the local camera-to-Godot body-language conversation.
@@ -114,10 +136,12 @@ def main(
     :param headless: Hide both Godot windows.
     :param demo: Run with synthetic motion instead of captured input.
     :param seconds: Optional finite, positive live-session timeout.
-    :param prompt: Additional dialogue instructions.
+    :param prompt: Enable direct interactive gesture playback.
     :param offline: Disable model downloads.
     :returns: None after owned resources have closed.
     """
+    if prompt and (demo or camera is not None or video is not None):
+        raise click.UsageError("--prompt cannot be combined with --demo, --camera or --video")
     if camera is not None and video is not None:
         raise click.UsageError("--camera and --video are mutually exclusive")
     if seconds is not None and not math.isfinite(seconds):
@@ -133,8 +157,6 @@ def main(
             values["renderer"]["executable"] = godot
         if headless:
             values["renderer"]["headless"] = True
-        if prompt is not None:
-            values["pipeline"]["user_prompt"] = prompt
         if offline:
             values["pose"]["model"]["local_files_only"] = True
             values["llm"]["model"]["local_files_only"] = True
@@ -144,7 +166,7 @@ def main(
     except (OSError, ValidationError) as error:
         raise click.ClickException(str(error)) from error
     try:
-        asyncio.run(run(config, demo=demo, seconds=seconds))
+        asyncio.run(run(config, demo=demo, prompt=prompt, seconds=seconds))
     except KeyboardInterrupt:
         click.echo("\nStopped.")
 

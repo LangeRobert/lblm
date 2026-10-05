@@ -24,6 +24,8 @@ the owned Godot process.
 ```bash
 # Camera-free demo: real language/motion models and Godot, synthetic input wave.
 uv run --all-extras python main.py --demo
+# Direct gesture mode: type actions in the terminal; no camera, captioner or dialogue LLM.
+uv run --extra motiongpt python main.py --prompt
 # Local video as input; no physical camera access.
 uv run --all-extras python main.py --video /absolute/path/person.mp4
 # Reuse cached weights without network access; hide the engine window for a smoke run.
@@ -38,8 +40,23 @@ initialization. The camera extra uses the same OpenCV-contrib distribution as
 MediaPipe to avoid two packages overwriting `cv2`.
 
 `--config settings.json` loads the strict nested `AppConfig` schema in
-`src/app.py`. CLI overrides include `--camera 0`, `--prompt "..."`, `--seconds 60`,
+`src/app.py`. CLI overrides include `--camera 0`, `--prompt`, `--seconds 60`,
 `--godot`, `--headless`, and `--offline`. The time limit includes model startup. The CLI uses Click; `--help` lists all options.
+
+`python main.py --prompt` starts an interactive gesture session. Enter an action
+such as `wave hello` or `raise both arms` at `Gesture>`; it goes directly to
+MotionGPT and plays on the avatar before the next prompt. Blank lines are ignored.
+If motion generation fails, the application reports the error, cancels any partial
+playback and skips that gesture. The session stays open for the next gesture;
+camera mode uses the same recovery behavior for generated reactions.
+Use `/quit`, `/exit`, terminal EOF (Ctrl-D), or Ctrl-C to close the session.
+Only stages 6–9 open: motion generation, processing, retargeting and rendering.
+The camera, pose detection, motion classification/captioning and dialogue LLM are
+skipped. This mode needs the `motiongpt` extra and Godot, and supports `--offline`,
+`--headless`, `--config` and `--seconds` (including time spent waiting for input).
+It cannot be combined with `--demo`, `--camera` or `--video`.
+`--prompt` is now a mode flag; conversation instructions for camera mode can be
+set using `pipeline.user_prompt` in the JSON configuration.
 
 Godot opens two native windows side by side: the avatar visualizer and a portrait
 conversation window matching the supplied 1080×1920 design. The companion uses
